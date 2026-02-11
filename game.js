@@ -1,5 +1,11 @@
 import * as THREE from 'https://unpkg.com/three@0.162.0/build/three.module.js';
 
+const ACTIVE_SKILLS = {
+  k: { name: '震山掌（K）', desc: '對周圍造成範圍傷害', cost: 65, mpCost: 24, cooldown: 1.2 },
+  l: { name: '金鐘護體（L）', desc: '短時間無敵', cost: 72, mpCost: 30, cooldown: 7.0 },
+  colon: { name: '毒罡護身（:）', desc: '短時間使接觸你的敵人中毒', cost: 68, mpCost: 28, cooldown: 8.0 },
+};
+
 const state = {
   stage: 1,
   coins: 0,
@@ -8,6 +14,7 @@ const state = {
   enemies: [],
   projectiles: [],
   slashEffects: [],
+  skillEffects: [],
   potions: [],
   inventory: [],
   skills: {
@@ -17,6 +24,7 @@ const state = {
     破軍式: { level: 0, max: 3, desc: '普攻傷害 +20%/級', cost: 30 },
     玄門勁: { level: 0, max: 3, desc: '武學傷害 +25%/級', cost: 35 },
   },
+  activeSkillOwnership: { k: false, l: false, colon: false },
   stats: {
     hpMax: 120,
     mpMax: 90,
@@ -61,16 +69,19 @@ const ui = {
 
 const keyState = {};
 window.addEventListener('keydown', (e) => {
-  keyState[e.key.toLowerCase()] = true;
-  if (e.key.toLowerCase() === 'j') attack();
-  if (e.key.toLowerCase() === 'k') castSkill();
+  const key = e.key.toLowerCase();
+  keyState[key] = true;
+  if (key === 'j') attack();
+  if (key === 'k') useSkillK();
+  if (key === 'l') useSkillL();
+  if (key === ':' || key === ';') useSkillColon();
 });
 window.addEventListener('keyup', (e) => {
   keyState[e.key.toLowerCase()] = false;
 });
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x8ca7a1, 0.012);
+scene.background = new THREE.Color(0xc7d6cd);
 
 const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 400);
 camera.position.set(26, 28, 26);
@@ -88,9 +99,6 @@ const sun = new THREE.DirectionalLight(0xfff0cc, 1.15);
 sun.position.set(26, 42, 15);
 scene.add(sun);
 
-const sky = createSkyDome();
-scene.add(sky);
-
 const floor = createFloor();
 scene.add(floor);
 
@@ -104,20 +112,6 @@ buildEnvironment(scene);
 
 const player = createPlayer();
 scene.add(player.root);
-
-function createSkyDome() {
-  const geo = new THREE.SphereGeometry(220, 24, 20);
-  const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    uniforms: {
-      top: { value: new THREE.Color(0xd6e9ff) },
-      bottom: { value: new THREE.Color(0xf6efe0) },
-    },
-    vertexShader: `varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);}`,
-    fragmentShader: `uniform vec3 top; uniform vec3 bottom; varying vec3 vPos; void main(){ float h = normalize(vPos).y * 0.5 + 0.5; gl_FragColor = vec4(mix(bottom, top, smoothstep(0.05, 0.9, h)), 1.0);}`,
-  });
-  return new THREE.Mesh(geo, mat);
-}
 
 function createFloor() {
   const canvas = document.createElement('canvas');
@@ -247,7 +241,6 @@ function createHumanoid(colorMain, colorAccent, withSword = false) {
   parts.rightArm = createArm(skinMat, robeMat, 0.82, 2.4);
   parts.leftLeg = createLeg(robeMat, -0.33, 0.65);
   parts.rightLeg = createLeg(robeMat, 0.33, 0.65);
-
   pelvis.add(parts.leftArm.group, parts.rightArm.group, parts.leftLeg.group, parts.rightLeg.group);
 
   if (withSword) {
@@ -269,19 +262,15 @@ function createHumanoid(colorMain, colorAccent, withSword = false) {
 function createArm(skinMat, clothMat, x, y) {
   const group = new THREE.Group();
   group.position.set(x, y, 0);
-
   const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 8), clothMat);
   const upper = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.8, 0.32), clothMat);
   upper.position.y = -0.38;
-
   const elbow = new THREE.Group();
   elbow.position.y = -0.78;
   const lower = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.72, 0.28), clothMat);
   lower.position.y = -0.36;
-
   const hand = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.22, 0.2), skinMat);
   hand.position.y = -0.8;
-
   elbow.add(lower, hand);
   group.add(shoulder, upper, elbow);
   return { group, elbow, hand };
@@ -290,7 +279,6 @@ function createArm(skinMat, clothMat, x, y) {
 function createLeg(clothMat, x, y) {
   const group = new THREE.Group();
   group.position.set(x, y, 0);
-
   const upper = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.9, 0.42), clothMat);
   upper.position.y = -0.45;
   const knee = new THREE.Group();
@@ -299,10 +287,27 @@ function createLeg(clothMat, x, y) {
   lower.position.y = -0.38;
   const boot = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.26, 0.55), new THREE.MeshStandardMaterial({ color: 0x23201f, roughness: 0.95 }));
   boot.position.set(0, -0.74, 0.08);
-
   knee.add(lower, boot);
   group.add(upper, knee);
   return { group, knee };
+}
+
+function createHealthBar() {
+  const group = new THREE.Group();
+  group.position.set(0, 4.6, 0);
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.16), new THREE.MeshBasicMaterial({ color: 0x2c1111, depthTest: false }));
+  const fill = new THREE.Mesh(new THREE.PlaneGeometry(1.52, 0.1), new THREE.MeshBasicMaterial({ color: 0x6eff7d, depthTest: false }));
+  fill.position.z = 0.01;
+  fill.position.x = -0.04;
+  group.add(bg, fill);
+  return { group, fill };
+}
+
+function updateEnemyHealthBar(enemy) {
+  const ratio = THREE.MathUtils.clamp(enemy.hp / enemy.maxHp, 0, 1);
+  enemy.healthFill.scale.x = ratio;
+  enemy.healthFill.position.x = -0.76 + 0.76 * ratio;
+  enemy.healthFill.material.color.set(ratio > 0.5 ? 0x73ff79 : ratio > 0.25 ? 0xffd45a : 0xff5e5e);
 }
 
 function createPlayer() {
@@ -311,17 +316,21 @@ function createPlayer() {
   return {
     ...human,
     attackCd: 0,
-    skillCd: 0,
+    skillCd: { k: 0, l: 0, colon: 0 },
     invincible: 0,
     attackAnim: 0,
     skillAnim: 0,
+    poisonAuraTimer: 0,
+    shieldTimer: 0,
   };
 }
 
 function createEnemy(isBoss = false) {
   const human = createHumanoid(isBoss ? 0x7f1f1f : 0x654136, isBoss ? 0xe0b062 : 0xb08b74, isBoss);
   human.root.scale.setScalar(isBoss ? 1.22 : 1.02);
-  return human;
+  const hpBar = createHealthBar();
+  human.root.add(hpBar.group);
+  return { ...human, healthBar: hpBar.group, healthFill: hpBar.fill };
 }
 
 function spawnEnemy(isBoss = false) {
@@ -330,7 +339,6 @@ function spawnEnemy(isBoss = false) {
   const enemyBody = createEnemy(isBoss);
   enemyBody.root.position.set((Math.random() - 0.5) * 56, 0.1, (Math.random() - 0.5) * 56);
   scene.add(enemyBody.root);
-
   state.enemies.push({
     ...enemyBody,
     hp,
@@ -340,6 +348,8 @@ function spawnEnemy(isBoss = false) {
     hitCd: 0,
     walkCycle: Math.random() * Math.PI * 2,
     hurtFlash: 0,
+    poisonTimer: 0,
+    poisonTickCd: 0,
   });
 }
 
@@ -348,7 +358,6 @@ function spawnPotion(pos) {
   ring.position.copy(pos);
   ring.position.y = 0.5;
   ring.rotation.x = Math.PI / 2;
-
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 10), new THREE.MeshStandardMaterial({ color: 0xccf0ff, emissive: 0x2f6791 }));
   core.position.copy(ring.position);
   scene.add(ring, core);
@@ -368,6 +377,7 @@ function clearRoundObjects() {
   state.enemies.forEach((e) => scene.remove(e.root));
   state.projectiles.forEach((p) => scene.remove(p.mesh));
   state.slashEffects.forEach((s) => scene.remove(s.mesh));
+  state.skillEffects.forEach((s) => scene.remove(s.mesh));
   state.potions.forEach((p) => {
     scene.remove(p.ring);
     scene.remove(p.core);
@@ -375,6 +385,7 @@ function clearRoundObjects() {
   state.enemies = [];
   state.projectiles = [];
   state.slashEffects = [];
+  state.skillEffects = [];
   state.potions = [];
 }
 
@@ -382,11 +393,8 @@ function startStage() {
   state.isBossStage = state.stage % 3 === 0;
   resetHpMp();
   clearRoundObjects();
-
   const count = stageEnemyCount();
-  for (let i = 0; i < count; i += 1) {
-    spawnEnemy(state.isBossStage && i === 0);
-  }
+  for (let i = 0; i < count; i += 1) spawnEnemy(state.isBossStage && i === 0);
   toast(state.isBossStage ? `第 ${state.stage} 回合：首領戰！` : `第 ${state.stage} 回合開始。`);
 }
 
@@ -398,7 +406,7 @@ function performAttackAnimation() {
 
   const slash = new THREE.Mesh(
     new THREE.TorusGeometry(1.4, 0.06, 8, 30, Math.PI * 1.15),
-    new THREE.MeshBasicMaterial({ color: 0xe9f3ff, transparent: true, opacity: 0.75 })
+    new THREE.MeshBasicMaterial({ color: 0xe9f3ff, transparent: true, opacity: 0.75, depthTest: false })
   );
   slash.position.copy(player.root.position).add(new THREE.Vector3(0, 1.5, 0));
   slash.rotation.y = player.root.rotation.y;
@@ -419,38 +427,93 @@ function attack() {
   state.enemies.forEach((enemy) => {
     const dist = enemy.root.position.distanceTo(player.root.position);
     if (dist > range) return;
-
     const crit = Math.random() < state.stats.crit ? 1.7 : 1;
     enemy.hp -= dmgBase * bonus * crit;
     enemy.hurtFlash = 0.12;
     enemy.parts.torso.material.color.set(0xffd4bf);
+    updateEnemyHealthBar(enemy);
   });
 }
 
-function castSkill() {
-  if (state.inShop || player.skillCd > 0 || state.stats.mp < 22) return;
-  state.stats.mp -= 22;
-  player.skillCd = 1.1;
-  player.skillAnim = 0.45;
+function triggerAoE() {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.5, 4.8, 42),
+    new THREE.MeshBasicMaterial({ color: 0x8ce6ff, transparent: true, opacity: 0.65, side: THREE.DoubleSide, depthTest: false })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.copy(player.root.position).setY(0.15);
+  scene.add(ring);
+  state.skillEffects.push({ mesh: ring, ttl: 0.35, kind: 'aoe' });
 
+  state.enemies.forEach((enemy) => {
+    const dist = enemy.root.position.distanceTo(player.root.position);
+    if (dist <= 4.8) {
+      enemy.hp -= state.stats.skillPower * (1 + state.skills.玄門勁.level * 0.25) * 1.15;
+      enemy.hurtFlash = 0.2;
+      enemy.parts.torso.material.color.set(0xa6e6ff);
+      updateEnemyHealthBar(enemy);
+    }
+  });
+}
+
+function useSkillK() {
+  if (!state.activeSkillOwnership.k) return toast('尚未解鎖技能：震山掌（K）');
+  if (state.inShop || player.skillCd.k > 0 || state.stats.mp < ACTIVE_SKILLS.k.mpCost) return;
+  state.stats.mp -= ACTIVE_SKILLS.k.mpCost;
+  player.skillCd.k = ACTIVE_SKILLS.k.cooldown;
+  player.skillAnim = 0.35;
+  triggerAoE();
+  castForwardProjectile(0.75);
+}
+
+function useSkillL() {
+  if (!state.activeSkillOwnership.l) return toast('尚未解鎖技能：金鐘護體（L）');
+  if (state.inShop || player.skillCd.l > 0 || state.stats.mp < ACTIVE_SKILLS.l.mpCost) return;
+  state.stats.mp -= ACTIVE_SKILLS.l.mpCost;
+  player.skillCd.l = ACTIVE_SKILLS.l.cooldown;
+  player.shieldTimer = 2.2;
+  player.invincible = Math.max(player.invincible, 2.2);
+  const aura = new THREE.Mesh(
+    new THREE.SphereGeometry(1.25, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffd98f, transparent: true, opacity: 0.32, wireframe: true, depthTest: false })
+  );
+  aura.position.copy(player.root.position).add(new THREE.Vector3(0, 1.7, 0));
+  scene.add(aura);
+  state.skillEffects.push({ mesh: aura, ttl: 2.2, kind: 'shield' });
+  toast('施展金鐘護體：短時間無敵。');
+}
+
+function useSkillColon() {
+  if (!state.activeSkillOwnership.colon) return toast('尚未解鎖技能：毒罡護身（:）');
+  if (state.inShop || player.skillCd.colon > 0 || state.stats.mp < ACTIVE_SKILLS.colon.mpCost) return;
+  state.stats.mp -= ACTIVE_SKILLS.colon.mpCost;
+  player.skillCd.colon = ACTIVE_SKILLS.colon.cooldown;
+  player.poisonAuraTimer = 6.0;
+  const poisonRing = new THREE.Mesh(
+    new THREE.TorusGeometry(1.4, 0.11, 12, 28),
+    new THREE.MeshBasicMaterial({ color: 0x9afc6f, transparent: true, opacity: 0.55, depthTest: false })
+  );
+  poisonRing.position.copy(player.root.position).add(new THREE.Vector3(0, 1.0, 0));
+  poisonRing.rotation.x = Math.PI / 2;
+  scene.add(poisonRing);
+  state.skillEffects.push({ mesh: poisonRing, ttl: 6.0, kind: 'poison' });
+  toast('施展毒罡護身：接觸你者中毒。');
+}
+
+function castForwardProjectile(dmgScale = 1) {
   const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.34, 1), new THREE.MeshStandardMaterial({ color: 0x7fe6ff, emissive: 0x2f7faa, roughness: 0.18 }));
   orb.position.copy(player.root.position).add(new THREE.Vector3(0, 1.2, 0));
   scene.add(orb);
 
-  const dir = new THREE.Vector3(
-    (keyState.a ? -1 : 0) + (keyState.d ? 1 : 0),
-    0,
-    (keyState.w ? -1 : 0) + (keyState.s ? 1 : 0),
-  );
-  if (dir.lengthSq() < 0.1) dir.set(0, 0, -1);
-  dir.normalize();
+  const dir = new THREE.Vector3(0, 0, 1);
+  dir.applyQuaternion(player.root.quaternion).normalize();
 
   state.projectiles.push({
     mesh: orb,
     vel: dir.multiplyScalar(20),
     ttl: 1.7,
     rot: new THREE.Vector3(6, 8, 4),
-    dmg: state.stats.skillPower * (1 + state.skills.玄門勁.level * 0.25),
+    dmg: state.stats.skillPower * (1 + state.skills.玄門勁.level * 0.25) * dmgScale,
   });
 }
 
@@ -486,18 +549,19 @@ function updatePlayerAnimation(dt, moveSpeed) {
 
 function updatePlayer(dt) {
   if (player.attackCd > 0) player.attackCd -= dt;
-  if (player.skillCd > 0) player.skillCd -= dt;
+  player.skillCd.k = Math.max(0, player.skillCd.k - dt);
+  player.skillCd.l = Math.max(0, player.skillCd.l - dt);
+  player.skillCd.colon = Math.max(0, player.skillCd.colon - dt);
   if (player.invincible > 0) player.invincible -= dt;
+  if (player.shieldTimer > 0) player.shieldTimer -= dt;
+  if (player.poisonAuraTimer > 0) player.poisonAuraTimer -= dt;
 
   let speed = state.stats.moveSpeed;
-  const move = new THREE.Vector3(
-    (keyState['a'] ? -1 : 0) + (keyState['d'] ? 1 : 0),
-    0,
-    (keyState['w'] ? -1 : 0) + (keyState['s'] ? 1 : 0)
-  );
+  const move = new THREE.Vector3((keyState.a ? -1 : 0) + (keyState.d ? 1 : 0), 0, (keyState.w ? -1 : 0) + (keyState.s ? 1 : 0));
+
   if (move.lengthSq() > 0) {
     move.normalize();
-    const sprinting = keyState['shift'] && state.stats.sp > 0;
+    const sprinting = keyState.shift && state.stats.sp > 0;
     if (sprinting) {
       speed *= 1.55;
       state.stats.sp = Math.max(0, state.stats.sp - 22 * dt);
@@ -534,21 +598,16 @@ function updatePlayer(dt) {
 function updateEnemyAnimation(enemy, dt, distToPlayer) {
   enemy.walkCycle += dt * (enemy.isBoss ? 5.8 : 6.8);
   const intensity = THREE.MathUtils.clamp(1 - distToPlayer / 15, 0.25, 1);
-
   enemy.parts.leftLeg.group.rotation.x = Math.sin(enemy.walkCycle) * 0.36 * intensity;
   enemy.parts.rightLeg.group.rotation.x = Math.sin(enemy.walkCycle + Math.PI) * 0.36 * intensity;
   enemy.parts.leftArm.group.rotation.x = Math.sin(enemy.walkCycle + Math.PI) * 0.24 * intensity;
   enemy.parts.rightArm.group.rotation.x = Math.sin(enemy.walkCycle) * 0.24 * intensity;
 
-  if (enemy.isBoss && enemy.parts.sword) {
-    enemy.parts.sword.rotation.z = Math.sin(enemy.walkCycle * 0.6) * 0.4;
-  }
+  if (enemy.isBoss && enemy.parts.sword) enemy.parts.sword.rotation.z = Math.sin(enemy.walkCycle * 0.6) * 0.4;
 
   if (enemy.hurtFlash > 0) {
     enemy.hurtFlash -= dt;
-    if (enemy.hurtFlash <= 0) {
-      enemy.parts.torso.material.color.set(enemy.isBoss ? 0x7f1f1f : 0x654136);
-    }
+    if (enemy.hurtFlash <= 0) enemy.parts.torso.material.color.set(enemy.isBoss ? 0x7f1f1f : 0x654136);
   }
 }
 
@@ -560,7 +619,22 @@ function updateEnemies(dt) {
 
     enemy.root.position.addScaledVector(toPlayer, enemy.speed * dt);
     enemy.root.lookAt(player.root.position.x, enemy.root.position.y, player.root.position.z);
+    enemy.healthBar.quaternion.copy(camera.quaternion);
     updateEnemyAnimation(enemy, dt, dist);
+
+    if (player.poisonAuraTimer > 0 && dist < 1.8) enemy.poisonTimer = Math.max(enemy.poisonTimer, 2.2);
+
+    if (enemy.poisonTimer > 0) {
+      enemy.poisonTimer -= dt;
+      enemy.poisonTickCd -= dt;
+      if (enemy.poisonTickCd <= 0) {
+        enemy.poisonTickCd = 0.5;
+        enemy.hp -= 7 + state.stage * 0.4;
+        enemy.parts.torso.material.color.set(0x84ff84);
+        enemy.hurtFlash = 0.1;
+        updateEnemyHealthBar(enemy);
+      }
+    }
 
     enemy.hitCd -= dt;
     if (dist < (enemy.isBoss ? 2.35 : 1.45) && enemy.hitCd <= 0 && player.invincible <= 0) {
@@ -574,6 +648,8 @@ function updateEnemies(dt) {
         state.inShop = true;
       }
     }
+
+    updateEnemyHealthBar(enemy);
   });
 
   const alive = [];
@@ -582,13 +658,11 @@ function updateEnemies(dt) {
       alive.push(enemy);
       continue;
     }
-
     scene.remove(enemy.root);
     state.coins += enemy.isBoss ? 120 : 10 + Math.floor(Math.random() * 8);
     if (Math.random() < (enemy.isBoss ? 0.65 : 0.15)) spawnPotion(enemy.root.position);
   }
   state.enemies = alive;
-
   if (state.enemies.length === 0 && !state.inShop) openShop();
 }
 
@@ -607,6 +681,7 @@ function updateProjectiles(dt) {
         enemy.hp -= p.dmg;
         enemy.hurtFlash = 0.15;
         enemy.parts.torso.material.color.set(0xa6e6ff);
+        updateEnemyHealthBar(enemy);
         hit = true;
         break;
       }
@@ -622,19 +697,39 @@ function updateProjectiles(dt) {
 }
 
 function updateEffects(dt) {
-  const rest = [];
+  const slashRest = [];
   for (const slash of state.slashEffects) {
     slash.ttl -= dt;
     slash.mesh.rotation.z += dt * 14;
     slash.mesh.material.opacity = Math.max(0, slash.ttl * 3.8);
     slash.mesh.scale.multiplyScalar(1 + dt * 2.2);
-    if (slash.ttl <= 0) {
-      scene.remove(slash.mesh);
-    } else {
-      rest.push(slash);
-    }
+    if (slash.ttl <= 0) scene.remove(slash.mesh);
+    else slashRest.push(slash);
   }
-  state.slashEffects = rest;
+  state.slashEffects = slashRest;
+
+  const skillRest = [];
+  for (const effect of state.skillEffects) {
+    effect.ttl -= dt;
+    if (effect.kind === 'aoe') {
+      effect.mesh.scale.multiplyScalar(1 + dt * 3.5);
+      effect.mesh.material.opacity = Math.max(0, effect.ttl * 2.4);
+    }
+    if (effect.kind === 'shield') {
+      effect.mesh.position.copy(player.root.position).add(new THREE.Vector3(0, 1.7, 0));
+      effect.mesh.rotation.y += dt * 3;
+      effect.mesh.material.opacity = 0.15 + Math.sin(performance.now() * 0.015) * 0.08;
+    }
+    if (effect.kind === 'poison') {
+      effect.mesh.position.copy(player.root.position).add(new THREE.Vector3(0, 1, 0));
+      effect.mesh.rotation.z += dt * 4;
+      effect.mesh.material.opacity = 0.3 + Math.sin(performance.now() * 0.02) * 0.2;
+    }
+
+    if (effect.ttl <= 0) scene.remove(effect.mesh);
+    else skillRest.push(effect);
+  }
+  state.skillEffects = skillRest;
 }
 
 const toolPool = [
@@ -649,6 +744,11 @@ function buyTool(tool) {
   state.inventory.push(tool.name);
   tool.apply();
   toast(`購入工具：${tool.name}`);
+}
+
+function buyActiveSkill(key) {
+  state.activeSkillOwnership[key] = true;
+  toast(`解鎖技能：${ACTIVE_SKILLS[key].name}`);
 }
 
 function levelSkill(name) {
@@ -674,8 +774,8 @@ function openShop() {
 
 function renderShopOffers() {
   const offers = [];
-  const skillNames = Object.keys(state.skills).filter((n) => state.skills[n].level < state.skills[n].max);
 
+  const skillNames = Object.keys(state.skills).filter((n) => state.skills[n].level < state.skills[n].max);
   for (let i = 0; i < 2 && skillNames.length; i += 1) {
     const idx = Math.floor(Math.random() * skillNames.length);
     const name = skillNames.splice(idx, 1)[0];
@@ -688,7 +788,18 @@ function renderShopOffers() {
     });
   }
 
-  const tools = [...toolPool].sort(() => Math.random() - 0.5).slice(0, 3);
+  Object.entries(ACTIVE_SKILLS).forEach(([key, skill]) => {
+    if (!state.activeSkillOwnership[key]) {
+      offers.push({
+        name: skill.name,
+        desc: `${skill.desc}｜耗內力 ${skill.mpCost}`,
+        cost: skill.cost,
+        buy: () => buyActiveSkill(key),
+      });
+    }
+  });
+
+  const tools = [...toolPool].sort(() => Math.random() - 0.5).slice(0, 2);
   tools.forEach((tool) => offers.push({ ...tool, buy: () => buyTool(tool) }));
 
   ui.shopItems.innerHTML = '';
@@ -696,7 +807,6 @@ function renderShopOffers() {
     const div = document.createElement('div');
     div.className = 'shop-item';
     div.innerHTML = `<strong>${offer.name}</strong><p>${offer.desc}</p><p>價格：${offer.cost} 銅錢</p>`;
-
     const button = document.createElement('button');
     button.textContent = '購買';
     button.onclick = () => {
@@ -707,7 +817,6 @@ function renderShopOffers() {
       renderCharacterPanels();
       renderShopOffers();
     };
-
     div.appendChild(button);
     ui.shopItems.appendChild(div);
   });
@@ -738,22 +847,27 @@ ui.tabs.forEach((tab) => {
 ui.restartBtn.onclick = () => location.reload();
 
 function renderCharacterPanels() {
-  ui.skillsTab.innerHTML = Object.entries(state.skills)
-    .map(([name, node]) => `
+  const activeSkillSummary = [
+    `震山掌（K）：${state.activeSkillOwnership.k ? '已解鎖' : '未解鎖'}`,
+    `金鐘護體（L）：${state.activeSkillOwnership.l ? '已解鎖' : '未解鎖'}`,
+    `毒罡護身（:）：${state.activeSkillOwnership.colon ? '已解鎖' : '未解鎖'}`,
+  ].map((line) => `<div class="skill-node">${line}</div>`).join('');
+
+  ui.skillsTab.innerHTML =
+    Object.entries(state.skills)
+      .map(([name, node]) => `
       <div class="skill-node">
         <strong>${name}</strong>
         <p>${node.desc}</p>
         <p>等級：Lv.${node.level} / ${node.max}</p>
       </div>
     `)
-    .join('');
+      .join('') + activeSkillSummary;
 
   if (state.inventory.length === 0) {
     ui.inventoryTab.innerHTML = '<div class="inv-item">目前沒有工具。請於回合商店購買。</div>';
   } else {
-    ui.inventoryTab.innerHTML = state.inventory
-      .map((item, idx) => `<div class="inv-item">${idx + 1}. ${item}</div>`)
-      .join('');
+    ui.inventoryTab.innerHTML = state.inventory.map((item, idx) => `<div class="inv-item">${idx + 1}. ${item}</div>`).join('');
   }
 
   const s = state.stats;
@@ -766,9 +880,7 @@ function renderCharacterPanels() {
     `防禦：${Math.floor(s.defense)}`,
     `會心：${Math.floor(s.crit * 100)}%`,
     `氣回復 / 秒：${Math.floor(s.spRegen * (1 + state.skills.神行訣.level * 0.15))}`,
-  ]
-    .map((line) => `<div class="stat-row">${line}</div>`)
-    .join('');
+  ].map((line) => `<div class="stat-row">${line}</div>`).join('');
 }
 
 function updateUI() {
@@ -791,7 +903,6 @@ function toast(msg) {
 }
 
 const clock = new THREE.Clock();
-
 function loop() {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, clock.getDelta());
