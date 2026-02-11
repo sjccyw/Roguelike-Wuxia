@@ -1,0 +1,89 @@
+:root {
+  --bg: #101820;
+  --panel: rgba(18, 22, 33, 0.85);
+  --line: #2f3a4d;
+  --text: #e9efff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  background: #000;
+  color: var(--text);
+  overflow: hidden;
+}
+canvas { display: block; }
+#hud {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  width: min(420px, 95vw);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  z-index: 10;
+}
+h1 { margin: 0 0 8px; font-size: 20px; }
+.bars { display: grid; gap: 6px; }
+.bar-wrap { display: grid; grid-template-columns: 70px 1fr 90px; align-items: center; gap: 8px; font-size: 13px; }
+.bar { height: 14px; border: 1px solid #476; background: #0f1420; border-radius: 999px; overflow: hidden; }
+.fill { height: 100%; width: 50%; transition: width .1s; }
+.hp { background: linear-gradient(90deg,#b42222,#ff6b6b); }
+.mp { background: linear-gradient(90deg,#2732a7,#55c4ff); }
+.sp { background: linear-gradient(90deg,#2d8f24,#8cff58); }
+.meta { display: flex; gap: 12px; margin-top: 8px; font-size: 13px; flex-wrap: wrap; }
+.controls { display: flex; gap: 8px; margin-top: 10px; }
+button {
+  background: #1b2638;
+  color: #eef;
+  border: 1px solid #41516f;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+button:hover { background: #2d3d56; }
+.tips { margin: 8px 0 0; color: #b7c4dc; font-size: 12px; }
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.hidden { display: none; }
+.modal {
+  width: min(760px, 92vw);
+  max-height: 84vh;
+  overflow: auto;
+  background: #121825;
+  border: 1px solid #3a4964;
+  border-radius: 12px;
+  padding: 16px;
+}
+.tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+.tab.active { background: #3f69a4; }
+.tab-content { display: none; border: 1px solid #2e3a50; border-radius: 8px; padding: 10px; min-height: 200px; }
+.tab-content.active { display: block; }
+.skill-node, .inv-item, .stat-row, .shop-item {
+  border: 1px solid #2f4468;
+  background: #172036;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); gap: 10px; }
+.message {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  background: rgba(18,26,39,.93);
+  border: 1px solid #44597f;
+  border-radius: 8px;
+  padding: 10px;
+  max-width: 380px;
+  font-size: 13px;
+  z-index: 30;
+}
