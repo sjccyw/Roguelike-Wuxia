@@ -137,10 +137,13 @@ function createFloor() {
   tex.repeat.set(8, 8);
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-  return new THREE.Mesh(
+  const floorMesh = new THREE.Mesh(
     new THREE.CircleGeometry(40, 90),
     new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, metalness: 0.0 })
   );
+  floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.position.y = 0.001;
+  return floorMesh;
 }
 
 function buildEnvironment(targetScene) {
