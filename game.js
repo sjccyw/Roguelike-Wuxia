@@ -491,14 +491,13 @@ function updatePlayer(dt) {
 
   let speed = state.stats.moveSpeed;
   const move = new THREE.Vector3(
-    (keyState.a ? -1 : 0) + (keyState.d ? 1 : 0),
+    (keyState['a'] ? -1 : 0) + (keyState['d'] ? 1 : 0),
     0,
-    (keyState.w ? -1 : 0) + (keyState.s ? 1 : 0),
+    (keyState['w'] ? -1 : 0) + (keyState['s'] ? 1 : 0)
   );
-
   if (move.lengthSq() > 0) {
     move.normalize();
-    const sprinting = keyState.shift && state.stats.sp > 0;
+    const sprinting = keyState['shift'] && state.stats.sp > 0;
     if (sprinting) {
       speed *= 1.55;
       state.stats.sp = Math.max(0, state.stats.sp - 22 * dt);
