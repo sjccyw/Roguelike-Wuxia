@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>江湖行俠錄 Prototype</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="hud">
+      <h1>江湖行俠錄（Prototype）</h1>
+      <div class="bars">
+        <div class="bar-wrap">
+          <span>生命 HP</span>
+          <div class="bar"><div id="hpBar" class="fill hp"></div></div>
+          <span id="hpText">0 / 0</span>
+        </div>
+        <div class="bar-wrap">
+          <span>內力 MP</span>
+          <div class="bar"><div id="mpBar" class="fill mp"></div></div>
+          <span id="mpText">0 / 0</span>
+        </div>
+        <div class="bar-wrap">
+          <span>氣 SP</span>
+          <div class="bar"><div id="spBar" class="fill sp"></div></div>
+          <span id="spText">0 / 0</span>
+        </div>
+      </div>
+      <div class="meta">
+        <span id="roundText">回合：1</span>
+        <span id="coinsText">銅錢：0</span>
+        <span id="waveText">敵人：0</span>
+      </div>
+      <div class="controls">
+        <button id="panelBtn">角色頁面</button>
+        <button id="restartBtn">重新開始</button>
+      </div>
+      <p class="tips">操作：WASD 移動、Shift 衝刺（耗氣）、J 普攻（耗氣）、K/L/: 施放已解鎖技能（耗內力）</p>
+    </div>
+
+    <div id="panel" class="hidden overlay">
+      <div class="modal">
+        <h2>角色管理</h2>
+        <div class="tabs">
+          <button class="tab active" data-tab="skills">武學樹</button>
+          <button class="tab" data-tab="inventory">工具袋</button>
+          <button class="tab" data-tab="stats">角色屬性</button>
+        </div>
+        <div id="skills" class="tab-content active"></div>
+        <div id="inventory" class="tab-content"></div>
+        <div id="stats" class="tab-content"></div>
+        <button id="closePanel">關閉</button>
+      </div>
+    </div>
+
+    <div id="shop" class="hidden overlay">
+      <div class="modal">
+        <h2 id="shopTitle">江湖商會</h2>
+        <p id="shopDesc"></p>
+        <div id="shopItems" class="shop-grid"></div>
+        <div class="shop-actions">
+          <button id="continueBtn">進入下一回合</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="message" class="message"></div>
+
+    <script type="module" src="game.js"></script>
+  </body>
+</html>
