@@ -353,6 +353,11 @@ function spawnEnemy(isBoss = false) {
     hurtFlash: 0,
     poisonTimer: 0,
     poisonTickCd: 0,
+    bossMode: 'chase',
+    bossModeTimer: 0,
+    bossSkillCd: 2.0,
+    strafeDir: Math.random() > 0.5 ? 1 : -1,
+    dashTimer: 0,
   });
 }
 
@@ -425,11 +430,20 @@ function attack() {
 
   const dmgBase = state.stats.attack;
   const bonus = 1 + state.skills.破軍式.level * 0.2;
-  const range = 2.7;
+  const range = 4.4;
+  const halfAngle = THREE.MathUtils.degToRad(75);
+  const coneThreshold = Math.cos(halfAngle);
+  const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(player.root.quaternion).normalize();
 
   state.enemies.forEach((enemy) => {
-    const dist = enemy.root.position.distanceTo(player.root.position);
+    const toEnemy = enemy.root.position.clone().sub(player.root.position);
+    const dist = toEnemy.length();
     if (dist > range) return;
+
+    toEnemy.normalize();
+    const inWideCone = forward.dot(toEnemy) >= coneThreshold || dist < 1.8;
+    if (!inWideCone) return;
+
     const crit = Math.random() < state.stats.crit ? 1.7 : 1;
     enemy.hp -= dmgBase * bonus * crit;
     enemy.hurtFlash = 0.12;
@@ -560,10 +574,21 @@ function updatePlayer(dt) {
   if (player.poisonAuraTimer > 0) player.poisonAuraTimer -= dt;
 
   let speed = state.stats.moveSpeed;
-  const move = new THREE.Vector3((keyState.a ? -1 : 0) + (keyState.d ? 1 : 0), 0, (keyState.w ? -1 : 0) + (keyState.s ? 1 : 0));
+  const inputX = (keyState.a ? -1 : 0) + (keyState.d ? 1 : 0);
+  const inputZ = (keyState.w ? 1 : 0) + (keyState.s ? -1 : 0);
+  const move = new THREE.Vector3();
 
-  if (move.lengthSq() > 0) {
+  if (inputX !== 0 || inputZ !== 0) {
+    const camForward = camera.getWorldDirection(new THREE.Vector3());
+    camForward.y = 0;
+    camForward.normalize();
+
+    const camRight = new THREE.Vector3().crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
+
+    move.addScaledVector(camRight, inputX);
+    move.addScaledVector(camForward, inputZ);
     move.normalize();
+
     const sprinting = keyState.shift && state.stats.sp > 0;
     if (sprinting) {
       speed *= 1.55;
@@ -614,13 +639,91 @@ function updateEnemyAnimation(enemy, dt, distToPlayer) {
   }
 }
 
+function bossSlam(enemy) {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.8, 4.6, 40),
+    new THREE.MeshBasicMaterial({ color: 0xff9a67, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthTest: false })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.copy(enemy.root.position).setY(0.18);
+  scene.add(ring);
+  state.skillEffects.push({ mesh: ring, ttl: 0.4, kind: 'bossAoe' });
+
+  const dist = enemy.root.position.distanceTo(player.root.position);
+  if (dist < 4.6 && player.invincible <= 0) {
+    const dmg = 26 + state.stage * 0.9;
+    state.stats.hp -= Math.max(3, dmg - state.stats.defense * 0.5);
+    player.invincible = 0.25;
+  }
+}
+
+function computeBossMove(enemy, dt, toPlayer, dist) {
+  enemy.bossModeTimer -= dt;
+  enemy.bossSkillCd -= dt;
+
+  if (enemy.bossModeTimer <= 0) {
+    if (dist > 9) {
+      enemy.bossMode = 'dash';
+      enemy.dashTimer = 0.85;
+      enemy.bossModeTimer = 1.1;
+    } else if (dist < 3.2) {
+      enemy.bossMode = 'retreat';
+      enemy.bossModeTimer = 1.0;
+    } else {
+      enemy.bossMode = Math.random() > 0.45 ? 'strafe' : 'chase';
+      enemy.strafeDir = Math.random() > 0.5 ? 1 : -1;
+      enemy.bossModeTimer = 1.6 + Math.random() * 0.8;
+    }
+  }
+
+  if (enemy.bossSkillCd <= 0) {
+    if (dist < 5.5) {
+      bossSlam(enemy);
+      enemy.bossSkillCd = 3.8;
+    } else {
+      enemy.bossMode = 'dash';
+      enemy.dashTimer = 0.95;
+      enemy.bossSkillCd = 4.2;
+    }
+  }
+
+  const moveDir = new THREE.Vector3();
+  if (enemy.bossMode === 'dash' && enemy.dashTimer > 0) {
+    enemy.dashTimer -= dt;
+    moveDir.copy(toPlayer).normalize();
+    return { dir: moveDir, speedScale: 2.8 };
+  }
+
+  if (enemy.bossMode === 'strafe') {
+    const lateral = new THREE.Vector3(-toPlayer.z, 0, toPlayer.x).normalize().multiplyScalar(enemy.strafeDir);
+    moveDir.copy(toPlayer).multiplyScalar(0.45).add(lateral).normalize();
+    return { dir: moveDir, speedScale: 1.25 };
+  }
+
+  if (enemy.bossMode === 'retreat') {
+    moveDir.copy(toPlayer).multiplyScalar(-1).normalize();
+    return { dir: moveDir, speedScale: 1.15 };
+  }
+
+  moveDir.copy(toPlayer).normalize();
+  return { dir: moveDir, speedScale: 1.05 };
+}
+
 function updateEnemies(dt) {
   state.enemies.forEach((enemy) => {
-    const toPlayer = player.root.position.clone().sub(enemy.root.position);
-    const dist = toPlayer.length();
-    toPlayer.normalize();
+    const toPlayerRaw = player.root.position.clone().sub(enemy.root.position);
+    const dist = toPlayerRaw.length();
+    const toPlayer = toPlayerRaw.lengthSq() > 0.0001 ? toPlayerRaw.clone().normalize() : new THREE.Vector3(0, 0, 1);
 
-    enemy.root.position.addScaledVector(toPlayer, enemy.speed * dt);
+    let moveDir = toPlayer;
+    let speedScale = 1;
+    if (enemy.isBoss) {
+      const bossMove = computeBossMove(enemy, dt, toPlayerRaw, dist);
+      moveDir = bossMove.dir;
+      speedScale = bossMove.speedScale;
+    }
+
+    enemy.root.position.addScaledVector(moveDir, enemy.speed * speedScale * dt);
     enemy.root.lookAt(player.root.position.x, enemy.root.position.y, player.root.position.z);
     enemy.healthBar.quaternion.copy(camera.quaternion);
     updateEnemyAnimation(enemy, dt, dist);
@@ -644,7 +747,7 @@ function updateEnemies(dt) {
       const raw = enemy.isBoss ? 19 + state.stage : 9 + state.stage * 0.68;
       const dmg = Math.max(2, raw - state.stats.defense);
       state.stats.hp -= dmg;
-      enemy.hitCd = enemy.isBoss ? 0.88 : 1.25;
+      enemy.hitCd = enemy.isBoss ? 0.72 : 1.25;
       player.invincible = 0.32;
       if (state.stats.hp <= 0) {
         toast('你已倒下，按「重新開始」再戰江湖。');
@@ -727,6 +830,10 @@ function updateEffects(dt) {
       effect.mesh.position.copy(player.root.position).add(new THREE.Vector3(0, 1, 0));
       effect.mesh.rotation.z += dt * 4;
       effect.mesh.material.opacity = 0.3 + Math.sin(performance.now() * 0.02) * 0.2;
+    }
+    if (effect.kind === 'bossAoe') {
+      effect.mesh.scale.multiplyScalar(1 + dt * 2.4);
+      effect.mesh.material.opacity = Math.max(0, effect.ttl * 2);
     }
 
     if (effect.ttl <= 0) scene.remove(effect.mesh);
